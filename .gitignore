@@ -1,0 +1,28 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Cache directories
+cache/
+osmnx_cache/
+
+# Downloaded data/shapefiles
+tracts_shapes/
+*.zip
+us_census_tracts_2023.csv
+
+# Output directory
+uas_analysis_output/
+
+# Virtual environment
+venv/
+*.venv/
+env/
+
+# IDE specific files
+.vscode/
+.idea/
+
+# OS specific files
+.DS_Store
+Thumbs.db 

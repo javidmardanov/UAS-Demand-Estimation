@@ -1,0 +1,15 @@
+geopandas
+osmnx
+cenpy
+contextily
+matplotlib
+seaborn
+scikit-learn
+requests
+scipy
+fuzzywuzzy
+python-levenshtein
+pyyaml
+Pillow
+pyogrio
+streamlit 

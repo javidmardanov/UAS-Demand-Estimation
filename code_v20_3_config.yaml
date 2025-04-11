@@ -1,0 +1,113 @@
+area_selection:
+  method: 'coordinates'
+  coordinates: [30.265, -97.745, 30.270, -97.740]
+  buffer_km: 1.0
+data_acquisition:
+  osm_tags: {'building': True, 'shop': True, 'amenity': True, 'landuse': True, 'highway': True}
+  census_variables: ['B19013_001E', 'B01003_001E', 'B25010_001E', 'B23025_004E', 'B23025_002E', 'B25001_001E']
+  census_product: "ACSDT5Y2022"
+  state_code: '48'
+  county_code: '453'
+  tract_year: 2022
+building_classification:
+  method: 'rule_based'
+  residential_keywords:
+    - residential
+    - house
+    - apartments
+    - detached
+    - terrace
+    - semidetached_house
+    - bungalow
+    - dormitory
+  non_residential_keywords:
+    - commercial
+    - retail
+    - industrial
+    - warehouse
+    - office
+    - public
+    - civic
+    - government
+    - school
+    - hospital
+    - university
+    - college
+  store_tags_keywords:
+    shop:
+      - supermarket
+      - convenience
+      - mall
+      - department_store
+      - wholesale
+      - grocery
+    amenity:
+      - marketplace
+      - fast_food
+      - pharmacy
+    building:
+      - retail
+      - commercial
+      - supermarket
+    name_keywords:
+      - walmart
+      - target
+      - amazon
+      - kroger
+      - H-E-B
+      - heb
+      - costco
+      - distribution center
+      - fulfillment
+      - supercenter
+      - warehouse
+      - grocery
+      - market
+      - cvs
+      - walgreens
+      - pharmacy
+height_estimation: {default_height_m: 3.5, meters_per_level: 3.5, knn_neighbors: 5, use_area_feature: True, max_height_cap_m: 150}
+population_allocation: {population_scale_factor: 1.0, avg_household_size_override: Null}
+demand_model:
+  base_deliveries_per_household_per_day: 0.18
+  # Corrected: Each coefficient on its own line
+  income_coef: 0.6
+  pop_density_coef: 0.2
+  household_size_coef: -0.15
+  employment_coef: 0.1
+  reference_values: {ref_median_income: 75000, ref_pop_density: 3000, ref_avg_household_size: 2.5, ref_employment_rate: 95}
+  daily_variation: {0: 1.2, 1: 1.0, 2: 1.0, 3: 1.1, 4: 1.2, 5: 0.8, 6: 0.5}
+  hourly_distribution:
+    0: 0.0
+    1: 0.0
+    2: 0.0
+    3: 0.0
+    4: 0.0
+    5: 0.0
+    6: 0.01
+    7: 0.02
+    8: 0.04
+    9: 0.06
+    10: 0.08
+    11: 0.09
+    12: 0.10
+    13: 0.11
+    14: 0.11
+    15: 0.10
+    16: 0.09
+    17: 0.08
+    18: 0.06
+    19: 0.04
+    20: 0.01
+    21: 0.00
+    22: 0.0
+    23: 0.0
+  monthly_factors: {1: 0.8, 2: 0.85, 3: 0.9, 4: 0.95, 5: 1.0, 6: 1.0, 7: 1.0, 8: 1.05, 9: 1.0, 10: 1.1, 11: 1.5, 12: 1.75}
+  simulation_start_date: '2023-11-06'
+  simulation_duration_days: 7
+origin_destination_matching:
+  method: 'Market Share Weighted'
+  market_shares: {'Walmart': 0.65, 'Target': 0.20, 'Retail Hub': 0.10, 'Kroger': 0.0, 'H-E-B': 0.05, 'Warehouse/Fulfillment': 0.0, 'Other': 0.0}
+  simulation_hour_for_matching: 17
+random_seed: 42
+output_dir: './uas_analysis_output' # This might be redundant if we handle paths programmatically 
