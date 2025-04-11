@@ -136,8 +136,9 @@ for mod_key in ['a', 'b', 'c', 'd', 'e', 'f', 'g']:
 if 'drawn_bounds' not in st.session_state:
     st.session_state.drawn_bounds = None # To store bounds from map
 if 'area_input_method' not in st.session_state:
-    # Default to coordinate input matching original config values
-    st.session_state.area_input_method = "Enter Coordinates" 
+    # --- Change Default Area Input Method --- 
+    st.session_state.area_input_method = "Draw on Map"
+    # --- End Change --- 
 
 # --- Page Title ---
 st.title("✈️ UAS Last-Mile Delivery Demand Modeler")
@@ -202,13 +203,16 @@ if st.session_state.area_input_method == "Draw on Map":
     results_area.warning("Draw a rectangle on the map. Please avoid excessively large areas, as this can significantly increase processing time and data downloads.", icon="⚠️")
 
     # Use initial coordinates from config for map center if available
-    map_center = [38.98, -95.67] # Default center (US)
-    zoom_start = 4
-    if st.session_state.config:
-        initial_coords = st.session_state.config.get('area_selection', {}).get('coordinates')
-        if initial_coords and len(initial_coords) == 4:
-            map_center = [(initial_coords[0] + initial_coords[2]) / 2, (initial_coords[1] + initial_coords[3]) / 2]
-            zoom_start = 12
+    # --- Change Default Map View --- 
+    map_center = [30.267, -97.743] # Default center (Central Austin)
+    zoom_start = 15              # Zoom in more by default
+    # --- End Change --- 
+    # Original logic to center based on config if needed (now less relevant with Draw default)
+    # if st.session_state.config:
+    #     initial_coords = st.session_state.config.get('area_selection', {}).get('coordinates')
+    #     if initial_coords and len(initial_coords) == 4:
+    #         map_center = [(initial_coords[0] + initial_coords[2]) / 2, (initial_coords[1] + initial_coords[3]) / 2]
+    #         zoom_start = 12
 
     m = folium.Map(location=map_center, zoom_start=zoom_start)
     draw_plugin = Draw(

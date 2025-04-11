@@ -118,6 +118,15 @@ def run_module_d(config, buildings_with_heights_gdf, census_data_df, tracts_gdf)
     try:
         # --- Add GEOID via Spatial Join --- 
         st.write("Spatially joining buildings to tracts to add GEOID...")
+        
+        # --- DEBUG PRINTS --- 
+        print(f"DEBUG (Module D): Input buildings_with_heights_gdf count: {len(buildings_with_heights_gdf)}")
+        input_res_count = buildings_with_heights_gdf[buildings_with_heights_gdf['residential'] == 'yes'].shape[0] if 'residential' in buildings_with_heights_gdf else 0
+        print(f"DEBUG (Module D): Input residential buildings count: {input_res_count}")
+        print(f"DEBUG (Module D): Input buildings CRS: {buildings_with_heights_gdf.crs}")
+        print(f"DEBUG (Module D): Tracts CRS: {tracts_gdf.crs}")
+        # --- END DEBUG PRINTS ---
+        
         if buildings_with_heights_gdf.crs != tracts_gdf.crs:
              # Assuming tracts_gdf is WGS84, project buildings GDF if needed
              st.warning(f"CRS mismatch between buildings ({buildings_with_heights_gdf.crs}) and tracts ({tracts_gdf.crs}). Reprojecting buildings to tracts CRS.")
@@ -138,6 +147,15 @@ def run_module_d(config, buildings_with_heights_gdf, census_data_df, tracts_gdf)
             buildings_with_geoid = buildings_with_geoid.drop(columns=['index_right'])
         status_messages.append(f"Spatially joined {len(buildings_with_geoid)} buildings to tracts to assign GEOID.")
         
+        # --- DEBUG PRINTS --- 
+        joined_res_count = buildings_with_geoid[buildings_with_geoid['residential'] == 'yes'].shape[0] if 'residential' in buildings_with_geoid else 0
+        print(f"DEBUG (Module D): Count AFTER join with residential==True: {joined_res_count}")
+        joined_geoid_count = buildings_with_geoid['GEOID'].notna().sum()
+        print(f"DEBUG (Module D): Count AFTER join with non-null GEOID: {joined_geoid_count}")
+        joined_res_geoid_count = buildings_with_geoid[(buildings_with_geoid['residential'] == 'yes') & buildings_with_geoid['GEOID'].notna()].shape[0] if 'residential' in buildings_with_geoid else 0
+        print(f"DEBUG (Module D): Count AFTER join with residential==True AND non-null GEOID: {joined_res_geoid_count}")
+        # --- END DEBUG PRINTS --- 
+        
         # Check for buildings that didn't get a GEOID
         missing_geoid_count = buildings_with_geoid['GEOID'].isna().sum()
         if missing_geoid_count > 0:
@@ -148,9 +166,10 @@ def run_module_d(config, buildings_with_heights_gdf, census_data_df, tracts_gdf)
         # --- Filter to Residential Buildings --- 
         if 'residential' not in buildings_with_geoid.columns:
              st.warning("Module D: 'residential' column not found in buildings GDF. Assuming ALL buildings are non-residential.")
-             residential_buildings = buildings_with_geoid[buildings_with_geoid['residential'] == True].copy() # Will likely be empty
+             residential_buildings = buildings_with_geoid[buildings_with_geoid['residential'] == 'yes'].copy() # Will likely be empty
         else:
-             residential_buildings = buildings_with_geoid[buildings_with_geoid['residential'] == True].copy()
+             # Check for string 'yes' rather than boolean True
+             residential_buildings = buildings_with_geoid[buildings_with_geoid['residential'] == 'yes'].copy()
         
         status_messages.append(f"Processing {len(residential_buildings)} residential buildings with GEOID.")
         st.write(f"Processing {len(residential_buildings)} residential buildings with GEOID.")
@@ -352,9 +371,15 @@ def run_module_d(config, buildings_with_heights_gdf, census_data_df, tracts_gdf)
                     stats_d["Allocation Difference (%)"] = f"{diff_pct:.2f}%"
 
             stats_d_df = pd.DataFrame.from_dict(stats_d, orient='index', columns=['Value'])
+            # Convert Value column to string BEFORE displaying
+            stats_d_df['Value'] = stats_d_df['Value'].astype(str)
             stats_d_path = os.path.join(stats_subdir, 'population_stats.csv')
-            stats_d_df.to_csv(stats_d_path)
-            status_messages.append(f"Saved: {os.path.basename(stats_d_path)}")
+            try:
+                stats_d_df.to_csv(stats_d_path)
+                status_messages.append(f"Saved: {os.path.basename(stats_d_path)}")
+            except Exception as e_save:
+                st.warning(f"Could not save population_stats.csv: {e_save}")
+                status_messages.append(f"WARN: Failed to save {os.path.basename(stats_d_path)}: {e_save}")
             st.write("Population Allocation Statistics:")
             st.dataframe(stats_d_df)
             

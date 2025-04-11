@@ -169,10 +169,10 @@ def run_module_f(config, delivery_events_df, stores_gdf, utm_crs):
         stores_proj = gpd.GeoDataFrame()
 
     # --- 2. Perform O-D Matching --- 
-    matched_events_list = []
     if not module_error:
         st.markdown("--- *Performing O-D Matching* ---")
         matching_method = od_config.get('method', 'proximity').lower()
+        print(f"DEBUG (Module F): Matching method identified as: '{matching_method}'")
         status_messages.append(f"Using matching method: {matching_method}")
         st.write(f"Matching {len(events_gdf)} events using '{matching_method}' method...")
         
@@ -184,23 +184,36 @@ def run_module_f(config, delivery_events_df, stores_gdf, utm_crs):
         try:
             if matching_method == 'proximity':
                 # Find nearest store for each event using sjoin_nearest
-                # Note: sjoin_nearest finds the single nearest feature
                 matched_gdf = gpd.sjoin_nearest(events_gdf, stores_proj, how='left')
                 matched_gdf.rename(columns={'index_right': 'store_index'}, inplace=True)
                 
-                # --- Add Check for Join Success ---
-                if matched_gdf['store_index'].isna().all():
+                # Check for Join Success & Filter to valid matches
+                valid_matches_mask = matched_gdf['store_index'].notna()
+                if not valid_matches_mask.any():
                     st.error("Spatial join (sjoin_nearest) failed to find any nearby stores for any delivery events.")
                     st.warning("Check if stores and residential areas overlap or if stores were correctly identified in Module B.")
                     status_messages.append("ERROR: sjoin_nearest found no matching origins for any events.")
                     raise ValueError("Proximity matching failed: No stores found near events.")
-                # --- End Check ---
+                elif valid_matches_mask.all() is False:
+                     failed_count = (~valid_matches_mask).sum()
+                     st.warning(f"Proximity match failed for {failed_count} events (no nearby store found).")
+                     status_messages.append(f"WARN: Proximity match failed for {failed_count} events.")
+                     matched_gdf = matched_gdf[valid_matches_mask].copy() # Keep only successful matches
                 
-                status_messages.append(f"Matched events to nearest store using proximity.")
-                matched_events_list.append(matched_gdf)
+                # Directly assign origin columns using the store_index
+                matched_gdf['origin_store_id'] = stores_proj.loc[matched_gdf['store_index'], 'store_id'].values
+                matched_gdf['origin_store_type'] = stores_proj.loc[matched_gdf['store_index'], 'store_type'].values
+                matched_gdf['origin_geometry'] = stores_proj.loc[matched_gdf['store_index'], 'geometry'].values
+                
+                status_messages.append(f"Matched {len(matched_gdf)} events to nearest store using proximity.")
+                # Since this is the only method implemented currently that produces results,
+                # we directly use this result. The list/concat is bypassed for now.
+                routing_dataset_full_gdf = matched_gdf 
+                # matched_events_list.append(merged_result) # No longer needed
                 match_prog.progress(1.0)
 
             elif matching_method == 'market_share_weighted':
+                print("DEBUG (Module F): Entering 'market_share_weighted' block.")
                 # Normalize market shares based on available store types
                 market_shares = od_config.get('market_shares', {})
                 available_shares = {stype: market_shares.get(stype, 0) 
@@ -213,47 +226,66 @@ def run_module_f(config, delivery_events_df, stores_gdf, utm_crs):
                     normalized_shares = {} # Fallback handled below
                 status_messages.append(f"Normalized Market Shares: {json.dumps(normalized_shares, indent=2)}")
                 
-                if not normalized_shares: # Fallback to proximity if shares are empty/zero
-                    matched_gdf = gpd.sjoin_nearest(events_gdf, stores_proj, how='left')
-                    matched_gdf.rename(columns={'index_right': 'store_index'}, inplace=True)
-                    status_messages.append("WARN: Market shares invalid, fell back to proximity matching.")
-                    matched_events_list.append(matched_gdf)
-                    match_prog.progress(1.0)
+                matched_events_list = [] # Initialize list to collect results
+                
+                # Assign target store type randomly based on shares
+                share_types = list(normalized_shares.keys())
+                share_probs = list(normalized_shares.values())
+                
+                # Assign target store type randomly based on shares
+                events_gdf['assigned_store_type'] = np.random.choice(share_types, size=total_events, p=share_probs)
+                status_messages.append("Assigned target store types based on market shares.")
+                
+                # Group events by assigned type and find nearest store *of that type*
+                for store_type, group in events_gdf.groupby('assigned_store_type'):
+                    st.write(f"  Matching events assigned to type: '{store_type}'...")
+                    possible_origins = stores_proj[stores_proj['store_type'] == store_type]
+                    if possible_origins.empty:
+                        st.warning(f"No stores found for assigned type '{store_type}'. Falling back to nearest overall store for these events.")
+                        status_messages.append(f"WARN: No stores of type '{store_type}', using fallback.")
+                        # Fallback: find nearest of *any* type
+                        matched_group = gpd.sjoin_nearest(group, stores_proj, how='left')
+                    else:
+                        matched_group = gpd.sjoin_nearest(group, possible_origins, how='left')
+                    
+                    matched_group.rename(columns={'index_right': 'store_index'}, inplace=True)
+                    matched_events_list.append(matched_group)
+                    processed_count += len(group)
+                    match_prog.progress(processed_count / total_events)
+                    
+                # After loop, concatenate results if list is not empty
+                if matched_events_list:
+                    routing_dataset_full_gdf = pd.concat(matched_events_list, ignore_index=True)
+                    # Assign origin details based on store_index AFTER concatenation
+                    valid_concat_matches_mask = routing_dataset_full_gdf['store_index'].notna()
+                    if not valid_concat_matches_mask.any():
+                        st.error("Market Share matching failed to find any nearby stores (after concat). Check logic.")
+                        raise ValueError("Market Share matching failed: No stores found near events after concat.")
+                    elif valid_concat_matches_mask.all() is False:
+                         failed_count = (~valid_concat_matches_mask).sum()
+                         st.warning(f"Market Share match failed for {failed_count} events post-concat (no nearby store of assigned type found). These events will be dropped.")
+                         status_messages.append(f"WARN: Market Share match failed post-concat for {failed_count} events.")
+                         routing_dataset_full_gdf = routing_dataset_full_gdf[valid_concat_matches_mask].copy()
+                    # Assign origin columns
+                    routing_dataset_full_gdf['origin_store_id'] = stores_proj.loc[routing_dataset_full_gdf['store_index'], 'store_id'].values
+                    routing_dataset_full_gdf['origin_store_type'] = stores_proj.loc[routing_dataset_full_gdf['store_index'], 'store_type'].values
+                    routing_dataset_full_gdf['origin_geometry'] = stores_proj.loc[routing_dataset_full_gdf['store_index'], 'geometry'].values
                 else:
-                    # Assign store type probabilistically, then find nearest of that type
-                    share_types = list(normalized_shares.keys())
-                    share_probs = list(normalized_shares.values())
+                    st.warning("Market Share matching produced no results (matched_events_list empty).")
+                    routing_dataset_full_gdf = gpd.GeoDataFrame() # Ensure empty if list was empty
                     
-                    # Assign target store type randomly based on shares
-                    events_gdf['assigned_store_type'] = np.random.choice(share_types, size=total_events, p=share_probs)
-                    status_messages.append("Assigned target store types based on market shares.")
-                    
-                    # Group events by assigned type and find nearest store *of that type*
-                    for store_type, group in events_gdf.groupby('assigned_store_type'):
-                        st.write(f"  Matching events assigned to type: '{store_type}'...")
-                        possible_origins = stores_proj[stores_proj['store_type'] == store_type]
-                        if possible_origins.empty:
-                            st.warning(f"No stores found for assigned type '{store_type}'. Falling back to nearest overall store for these events.")
-                            status_messages.append(f"WARN: No stores of type '{store_type}', using fallback.")
-                            # Fallback: find nearest of *any* type
-                            matched_group = gpd.sjoin_nearest(group, stores_proj, how='left')
-                        else:
-                            matched_group = gpd.sjoin_nearest(group, possible_origins, how='left')
-                        
-                        matched_group.rename(columns={'index_right': 'store_index'}, inplace=True)
-                        matched_events_list.append(matched_group)
-                        processed_count += len(group)
-                        match_prog.progress(processed_count / total_events)
-                    
-                    status_messages.append("Matched events to nearest store of assigned type.")
-                    match_prog.progress(1.0)
+                status_messages.append("Matched events to nearest store of assigned type.")
+                match_prog.progress(1.0)
+                print("DEBUG (Module F): FINISHED 'market_share_weighted' logic.")
+                print(f"DEBUG (Module F): routing_dataset_full_gdf is empty? {routing_dataset_full_gdf.empty}")
 
             elif matching_method == 'random':
+                 print("DEBUG (Module F): Entering 'random' block.")
                  # Assign a random store to each event
                  store_indices = stores_proj.index.tolist()
                  random_store_indices = np.random.choice(store_indices, size=total_events)
                  events_gdf['store_index'] = random_store_indices
-                 matched_events_list.append(events_gdf) # Events now have store_index
+                 # matched_events_list.append(events_gdf) # Events now have store_index
                  status_messages.append("Assigned random store to each event.")
                  match_prog.progress(1.0)
 
@@ -262,21 +294,31 @@ def run_module_f(config, delivery_events_df, stores_gdf, utm_crs):
                 status_messages.append(f"ERROR: Unsupported matching method '{matching_method}'. Used proximity.")
                 matched_gdf = gpd.sjoin_nearest(events_gdf, stores_proj, how='left')
                 matched_gdf.rename(columns={'index_right': 'store_index'}, inplace=True)
-                matched_events_list.append(matched_gdf)
+                # --- Fix: Assign result and add origin columns --- 
+                routing_dataset_full_gdf = matched_gdf # Assign to main variable
+                # Check join success & filter
+                valid_matches_mask = routing_dataset_full_gdf['store_index'].notna()
+                if not valid_matches_mask.any():
+                    st.error("Fallback proximity matching failed to find any nearby stores.")
+                    raise ValueError("Fallback proximity matching failed.")
+                elif valid_matches_mask.all() is False:
+                    failed_count = (~valid_matches_mask).sum()
+                    st.warning(f"Fallback proximity match failed for {failed_count} events.")
+                    routing_dataset_full_gdf = routing_dataset_full_gdf[valid_matches_mask].copy()
+                # Assign origin columns
+                routing_dataset_full_gdf['origin_store_id'] = stores_proj.loc[routing_dataset_full_gdf['store_index'], 'store_id'].values
+                routing_dataset_full_gdf['origin_store_type'] = stores_proj.loc[routing_dataset_full_gdf['store_index'], 'store_type'].values
+                routing_dataset_full_gdf['origin_geometry'] = stores_proj.loc[routing_dataset_full_gdf['store_index'], 'geometry'].values
+                # --- End Fix --- 
+                # matched_events_list.append(matched_gdf) # No longer needed here
                 match_prog.progress(1.0)
-                
-            # Consolidate results if needed (market share does this iteratively)
-            if matched_events_list:
-                 consolidated_matches = pd.concat(matched_events_list).sort_index()
-                 # Merge store details back based on store_index
-                 routing_dataset_full_gdf = consolidated_matches.merge(
-                     stores_proj.add_prefix('origin_'), 
-                     left_on='store_index', right_index=True, how='left'
-                 )
-                 status_messages.append("Merged matched store details.")
-            else:
-                 st.error("O-D Matching failed to produce results.")
-                 raise ValueError("O-D Matching produced no results.")
+                print("DEBUG (Module F): Finished 'else' (proximity fallback) block.")
+            
+            # Check if routing_dataset_full_gdf was actually populated (e.g., if proximity ran)
+            print("DEBUG (Module F): BEFORE check if routing_dataset_full_gdf is empty.")
+            if routing_dataset_full_gdf.empty and not module_error:
+                 st.error("O-D Matching method did not produce a result DataFrame.")
+                 raise ValueError("O-D Matching produced no results DataFrame.")
                  
         except Exception as e:
             st.error(f"Error during O-D matching ({matching_method}): {e}")
@@ -426,9 +468,15 @@ def run_module_f(config, delivery_events_df, stores_gdf, utm_crs):
                 stats_f["Max Deliveries to Single Destination"] = dest_counts.max()
 
             stats_f_df = pd.DataFrame.from_dict(stats_f, orient='index', columns=['Value'])
+            # Convert Value column to string BEFORE displaying
+            stats_f_df['Value'] = stats_f_df['Value'].astype(str)
             stats_f_path = os.path.join(stats_subdir, 'od_matching_stats.csv')
-            stats_f_df.to_csv(stats_f_path)
-            status_messages.append(f"Saved: {os.path.basename(stats_f_path)}")
+            try:
+                stats_f_df.to_csv(stats_f_path)
+                status_messages.append(f"Saved: {os.path.basename(stats_f_path)}")
+            except Exception as e_save:
+                st.warning(f"Could not save od_matching_stats.csv: {e_save}")
+                status_messages.append(f"WARN: Failed to save {os.path.basename(stats_f_path)}: {e_save}")
             st.write("O-D Matching Statistics:")
             st.dataframe(stats_f_df)
             

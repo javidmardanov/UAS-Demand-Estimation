@@ -11,28 +11,30 @@ data_acquisition:
   tract_year: 2022
 building_classification:
   method: 'rule_based'
-  residential_keywords:
-    - residential
-    - house
-    - apartments
-    - detached
-    - terrace
-    - semidetached_house
-    - bungalow
-    - dormitory
-  non_residential_keywords:
-    - commercial
-    - retail
-    - industrial
-    - warehouse
-    - office
-    - public
-    - civic
-    - government
-    - school
-    - hospital
-    - university
-    - college
+  # Add the detailed parameters needed for the Colab logic
+  rule_based_parameters:
+    min_residential_area_m2: 30
+    likely_max_residential_area_m2: 500
+    min_nonresidential_area_m2: 2000 # Adjusted based on Colab comment, maybe needs tuning
+    residential_building_tags: ['residential', 'house', 'apartments', 'detached', 'terrace', 'semidetached_house', 'bungalow', 'dormitory']
+    nonresidential_building_tags: ['commercial', 'retail', 'industrial', 'warehouse', 'office', 'supermarket', 'shop', 'mall', 'store', 'school', 'hospital', 'church', 'public', 'civic', 'government', 'hotel', 'motel', 'cathedral', 'chapel', 'clinic', 'kindergarten', 'university', 'college']
+    residential_landuse: ['residential']
+    nonresidential_landuse: ['commercial', 'industrial', 'retail', 'institutional', 'military', 'brownfield']
+    residential_road_types: ['residential', 'living_street', 'unclassified', 'tertiary']
+    primary_road_types: ['primary', 'secondary', 'trunk', 'motorway']
+    road_buffer_meters: 30
+    residential_name_keywords: ['apartment', 'residence', 'housing', 'condo', 'villa', 'home', 'house', 'living', 'manor', 'place', 'tower', 'lofts', 'village', 'gardens']
+    nonresidential_name_keywords: ['school', 'store', 'shop', 'business', 'office', 'bank', 'restaurant', 'cafe', 'hotel', 'church', 'hospital', 'clinic', 'inc', 'corp', 'ltd', 'university', 'college', 'station', 'county', 'city of', 'state of', 'medical', 'center', 'institute', 'foundation']
+  # Old top-level keywords (now potentially redundant but keep for reference/backward compat?)
+  # residential_keywords:
+  #   - residential
+  #   - house
+  #   - apartments
+  #   ... (rest commented out or removed)
+  # non_residential_keywords:
+  #   - commercial
+  #   - retail
+  #   ... (rest commented out or removed)
   store_tags_keywords:
     shop:
       - supermarket

@@ -147,4 +147,11 @@ The application (`app.py`) calls functions sequentially from the `modules/` dire
     *   Review code for clarity and potential optimizations.
 *   **Documentation:** Update `README.md` with usage instructions, dependency list (including `streamlit-folium`), and explanation of the required Census CSV format.
 
+## Module B Building Classification Sensitivity (2025-04-11)
+
+*   The detailed rule-based classification logic in `modules/classification.py::classify_building_rules_detailed` is sensitive to the order and strictness of rules.
+*   A previous version had a loop: `for tag in ['shop', 'amenity', 'office', 'tourism', 'leisure']: buildings.loc[buildings[tag] != '', 'residential'] = 'no'`. This was **too aggressive** as it incorrectly marked residential buildings (like apartments with ground-floor shops or amenities) as non-residential.
+*   This loop has been **commented out**. The current logic relies more heavily on the `building` tag, name keywords, and area rules first.
+*   **Future Consideration:** If classification results seem inaccurate for new areas, review the tag/keyword lists in the config (`building_classification.rule_based_parameters`) and potentially revisit the commented-out rule or refine the logic further (e.g., allow certain amenities/shops if the primary `building` tag is strongly residential). The interaction between different OSM tags needs careful handling.
+
 ---

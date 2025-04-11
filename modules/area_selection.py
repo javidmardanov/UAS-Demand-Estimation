@@ -727,9 +727,15 @@ def run_module_a(config):
                 "Avg Income (Fetched Tracts)": census_data_df['median_income'].replace(0, np.nan).mean() if 'median_income' in census_data_df else 0, # Avoid zeros in mean
             }
             stats_a_df = pd.DataFrame.from_dict(stats_a, orient='index', columns=['Value'])
+            # Convert Value column to string BEFORE displaying to avoid Arrow errors
+            stats_a_df['Value'] = stats_a_df['Value'].astype(str)
             stats_a_path = os.path.join(stats_subdir, 'setup_stats.csv')
-            stats_a_df.to_csv(stats_a_path)
-            status_messages.append(f"Saved: {os.path.basename(stats_a_path)}")
+            try:
+                stats_a_df.to_csv(stats_a_path)
+                status_messages.append(f"Saved: {os.path.basename(stats_a_path)}")
+            except Exception as e_save:
+                st.warning(f"Could not save setup_stats.csv: {e_save}")
+                status_messages.append(f"WARN: Failed to save {os.path.basename(stats_a_path)}: {e_save}")
             st.write("Setup Statistics:")
             st.dataframe(stats_a_df)
         except Exception as e_stat:

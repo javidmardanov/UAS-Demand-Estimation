@@ -146,4 +146,56 @@ This file records key challenges, bugs, fixes, and lessons learned during the de
 *   **Resolution:** Added an explicit check immediately after the `sjoin_nearest` call in the `proximity` matching logic within `modules/od_matching.py`. This check verifies if `matched_gdf['store_index'].isna().all()` is True. If so, it raises a `ValueError` and displays messages indicating that no spatial matches were found, advising the user to check the spatial relationship between stores and demand locations or the store identification in Module B.
 *   **Implication:** Correctly identifies and reports the failure condition when no origins can be spatially matched to destinations, preventing misleading downstream errors and providing clearer user feedback.
 
+**2025-04-11: Module F - Merge Failure After Successful `sjoin_nearest`**
+*   **Problem:** Diagnostic prints revealed that `sjoin_nearest` was successfully finding store indices, but the subsequent merge operation (using `left_on='store_index', right_index=True`) was failing to bring over the `origin_geometry`, resulting in `None`/empty geometries and preventing LineString creation.
+*   **Cause:** The exact reason for the merge failure using the index was unclear, possibly related to index data types or subtle inconsistencies between the joined DataFrame and the store DataFrame.
+*   **Resolution:** Refactored the `proximity` matching logic in `modules/od_matching.py`. The merge operation (`.merge(stores_proj.add_prefix(...))`) is now performed *immediately* after `sjoin_nearest` successfully identifies matches (and potentially filters out failed matches). The result of this immediate merge is then appended to the `matched_events_list`. The separate merge step after concatenating `matched_events_list` was removed.
+*   **Implication:** Performing the merge immediately after the spatial join ensures the correct store details are linked using the index provided by `sjoin_nearest` at that specific point, avoiding potential index inconsistencies later.
+
+**2025-04-11: Module F - KeyError: 'origin_geometry' during Finalization**
+*   **Problem:** Module F failed during finalization with `KeyError: 'origin_geometry'` when calculating distances or creating LineStrings.
+*   **Cause:** The `pandas.merge` operation combined with `GeoDataFrame.add_prefix()` did not correctly rename the geometry column from the stores GeoDataFrame (`stores_proj`). It remained named 'geometry', colliding with the destination 'geometry' column, and the expected 'origin_geometry' column was never created.
+*   **Resolution:** Modified the merge step within the `proximity` block in `modules/od_matching.py`:
+    1. Create a copy of `stores_proj` (`stores_to_merge`).
+    2. Explicitly rename the `geometry` column to `origin_geometry` and other relevant columns (e.g., `store_id`, `store_type`) to have the `origin_` prefix in `stores_to_merge`.
+    3. Removed the `.add_prefix()` call from the merge.
+    4. Merged the `matched_gdf` (from `sjoin_nearest`) with the modified `stores_to_merge` DataFrame.
+*   **Implication:** Guarantees that the merged DataFrame (`routing_dataset_full_gdf`) contains the correctly named `origin_geometry` column required for subsequent distance and LineString calculations.
+
+**2025-04-11: Module F - Final Fix for `origin_geometry` KeyError**
+*   **Problem:** The `KeyError: 'origin_geometry'` persisted. Debugging showed that `pandas.merge` was dropping the explicitly renamed `origin_geometry` column when merging the `sjoin_nearest` results with the store data.
+*   **Cause:** Likely internal behavior of `pandas.merge` when merging two GeoDataFrames, where it mishandles the second geometry column.
+*   **Resolution:** Completely refactored the proximity matching logic in `modules/od_matching.py`:
+    1. Perform `sjoin_nearest` to get `matched_gdf` with `store_index`.
+    2. Validate `store_index` and filter `matched_gdf` to keep only valid matches.
+    3. **Removed the `.merge()` step.** Instead, directly created the required `origin_` columns (`origin_store_id`, `origin_store_type`, `origin_geometry`) in `matched_gdf` by using `store_index` to look up values in `stores_proj` via `.loc` (e.g., `matched_gdf['origin_geometry'] = stores_proj.loc[matched_gdf['store_index'], 'geometry'].values`).
+    4. Directly assigned the resulting `matched_gdf` to `routing_dataset_full_gdf`.
+    5. Removed the `matched_events_list` and `pd.concat` logic as it was only needed for multiple merge results.
+*   **Implication:** This manual column assignment based on the join index bypasses the problematic `pandas.merge` behavior for geometry columns, ensuring the `origin_geometry` column exists with the correct data for the final processing steps.
+
+**2025-04-11: Module F - Bug in Market Share Fallback Logic**
+*   **Problem:** Module F failed with `ValueError: O-D Matching produced no results DataFrame.` even though proximity matching *should* have run as a fallback when 'market share weighted' was selected but shares were invalid.
+*   **Cause:** The fallback logic *within* the `elif matching_method == 'market_share_weighted':` block correctly performed the `sjoin_nearest` operation but failed to assign the resulting DataFrame (`matched_gdf`) to the main variable `routing_dataset_full_gdf`. Consequently, `routing_dataset_full_gdf` remained empty, triggering the error check after the matching blocks.
+*   **Resolution:** Modified the fallback section (`if not normalized_shares:`) within the `market_share_weighted` block in `modules/od_matching.py`. It now assigns the result of `sjoin_nearest` to `routing_dataset_full_gdf` and includes the necessary subsequent steps (checking join success, directly assigning origin columns using `.loc`) previously implemented only in the main `proximity` block.
+*   **Implication:** Corrects the logic flow so that the fallback to proximity matching within the market share method correctly populates the main results DataFrame, allowing the module to proceed.
+
+**2025-04-11: Module B Refactoring for Detailed Classification**
+*   **Problem:** Module F consistently failed to produce O-D outputs, traced back to `sjoin_nearest` finding no matches. This suggested the input from Module B (classified buildings and stores) was inadequate, likely due to overly simplistic classification rules compared to the Colab prototype.
+*   **Resolution:** Overhauled Module B (`modules/classification.py`) to implement the more sophisticated classification logic from the Colab code (`code_v20_3.py`):
+    1.  **Config Update:** Added the detailed `rule_based_parameters` dictionary (containing area thresholds, specific keyword lists for tags, names, landuse, roads) from the Colab config into `code_v20_3_config.yaml`.
+    2.  **Function Porting:** Copied the `classify_building_rules_detailed` function (which uses tags, area, road proximity, landuse context) and the more nuanced `identify_store_type` function from the Colab code into `modules/classification.py`.
+    3.  **Integration:** Modified `run_module_b` to call these new functions, passing the necessary context (full `osm_gdf`, `buffer_polygon`, `utm_crs`). The simpler, previous classification logic was removed.
+    4.  **Bug Fix:** Corrected a `TypeError` (`'GeometryArray' does not support reduction 'sum'`) introduced during integration, ensuring the count of residential buildings was calculated correctly using `.sum()` on the boolean condition.
+*   **Implication:** Module B now uses a much more detailed set of rules, closer to the validated Colab prototype. This should significantly improve the accuracy of identifying residential buildings and stores, hopefully resolving the Module F matching failures by providing better quality input data.
+
+**2025-04-11: Debugging Module B Residential Classification**
+*   **Problem:** Module B (using detailed classification rules) identified zero residential buildings, causing downstream modules (D, E) to be skipped.
+*   **Debugging:** 
+    *   Initially suspected context rules (road/landuse). Commenting them out did not resolve the issue (still 0 residential).
+    *   Enabled debug print statements within `classify_building_rules_detailed`.
+    *   Output (`After Tag/Name Rules: {'no': 11376}`) revealed that **all buildings** were classified as 'no' immediately after the initial tag/name rules.
+    *   Identified an overly strict rule: A loop checking `shop`, `amenity`, `office`, `tourism`, `leisure` tags forced any building with *any* value in these tags to 'no', even if the primary `building` tag was residential (e.g., `building=apartments`, `amenity=parking`).
+*   **Fix:** Commented out the aggressive loop checking `shop`, `amenity`, etc. This allows buildings tagged as residential (e.g., `building=house`, `building=apartments`) to be correctly identified initially, letting subsequent area rules refine the classification.
+*   **Result:** With the fix, the tag/name rules correctly identified residential buildings (`{'yes': 1605, 'unknown': 9503, 'no': 268}`), and subsequent area rules further refined this. The final residential count became non-zero, allowing the pipeline to proceed.
+
 --- 

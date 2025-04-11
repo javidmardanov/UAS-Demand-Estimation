@@ -382,9 +382,15 @@ def run_module_e(config, buildings_with_population_gdf, census_data_df):
                  # ... add more detailed stats if needed
 
             stats_e_df = pd.DataFrame.from_dict(stats_e, orient='index', columns=['Value'])
+            # Convert Value column to string BEFORE displaying
+            stats_e_df['Value'] = stats_e_df['Value'].astype(str)
             stats_e_path = os.path.join(stats_subdir, 'demand_stats.csv')
-            stats_e_df.to_csv(stats_e_path)
-            status_messages.append(f"Saved: {os.path.basename(stats_e_path)}")
+            try:
+                stats_e_df.to_csv(stats_e_path)
+                status_messages.append(f"Saved: {os.path.basename(stats_e_path)}")
+            except Exception as e_save:
+                st.warning(f"Could not save demand_stats.csv: {e_save}")
+                status_messages.append(f"WARN: Failed to save {os.path.basename(stats_e_path)}: {e_save}")
             st.write("Demand Modeling Statistics:")
             st.dataframe(stats_e_df)
             

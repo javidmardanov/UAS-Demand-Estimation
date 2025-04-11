@@ -97,6 +97,14 @@ def run_module_c(config, classified_buildings_gdf, union_gdf, utm_crs):
     status_messages = []
     module_error = False
 
+    # --- DEBUG PRINTS AT FUNCTION START ---
+    # print(f"DEBUG (Module C): START - Input classified_buildings_gdf count: {len(classified_buildings_gdf)}")
+    # start_res_count = classified_buildings_gdf[classified_buildings_gdf['residential'] == True].shape[0] if 'residential' in classified_buildings_gdf else -1
+    # print(f"DEBUG (Module C): START - Input residential count: {start_res_count}")
+    # print(f"DEBUG (Module C): START - Input classified_buildings CRS: {classified_buildings_gdf.crs}")
+    # print(f"DEBUG (Module C): START - Input union_gdf CRS: {union_gdf.crs}")
+    # --- END DEBUG PRINTS AT FUNCTION START ---
+
     # --- Check Inputs --- 
     if classified_buildings_gdf is None or classified_buildings_gdf.empty:
         st.warning("Module C: Input classified buildings GeoDataFrame is empty. Skipping height estimation.")
@@ -125,9 +133,16 @@ def run_module_c(config, classified_buildings_gdf, union_gdf, utm_crs):
     # --- 1. Filter Buildings to Union Area --- 
     st.markdown("--- *Filtering Buildings to Union Area* ---")
     try:
+        # Initial clip (keeps parts overlapping)
         buildings_in_union_gdf = gpd.clip(classified_buildings_gdf, union_gdf)
-        # Keep only buildings whose representative point is within the union (handles edge cases)
-        # Need to project for representative_point()
+        
+        # --- DEBUG PRINT AFTER CLIP ---
+        clip_res_count = buildings_in_union_gdf[buildings_in_union_gdf['residential'] == 'yes'].shape[0] if 'residential' in buildings_in_union_gdf else -1 # Use -1 if col missing
+        # print(f"DEBUG (Module C): AFTER clip - Residential count: {clip_res_count}")
+        # print(f"DEBUG (Module C): AFTER clip - Columns: {buildings_in_union_gdf.columns.tolist()}")
+        # --- END DEBUG PRINT AFTER CLIP ---
+
+        # Refined filter: Keep only buildings whose representative point is strictly within
         if not utm_crs:
             st.warning("Estimating temporary UTM for filtering, original UTM preferred.")
             temp_utm = estimate_utm_crs(buildings_in_union_gdf)
@@ -138,13 +153,26 @@ def run_module_c(config, classified_buildings_gdf, union_gdf, utm_crs):
              buildings_in_union_proj = buildings_in_union_gdf.to_crs(temp_utm)
              union_proj = union_gdf.to_crs(temp_utm)
              buildings_in_union_proj['repr_point'] = buildings_in_union_proj.geometry.representative_point()
+             # Check which representative points are within the union
              within_mask = buildings_in_union_proj.repr_point.within(union_proj.geometry.iloc[0])
-             buildings_in_union_gdf = buildings_in_union_gdf.loc[within_mask[within_mask].index]
-             del buildings_in_union_proj # Free memory
+             # Apply the mask directly to the projected GDF and convert back
+             # --- Simplified Filtering --- 
+             filtered_buildings_proj = buildings_in_union_proj.loc[within_mask]
+             buildings_in_union_gdf = filtered_buildings_proj.to_crs(classified_buildings_gdf.crs) # Convert back to original CRS
+             # --- End Simplified Filtering ---
+             
+             # --- Drop the temporary geometry column --- 
+             if 'repr_point' in buildings_in_union_gdf.columns:
+                 buildings_in_union_gdf = buildings_in_union_gdf.drop(columns=['repr_point'])
+             # --- End Drop ---
+             
+             # --- DEBUG PRINT AFTER WITHIN FILTER ---
+             within_res_count = buildings_in_union_gdf[buildings_in_union_gdf['residential'] == 'yes'].shape[0] if 'residential' in buildings_in_union_gdf else -1
+             # print(f"DEBUG (Module C): AFTER within filter - Residential count: {within_res_count}")
+             # --- END DEBUG PRINT AFTER WITHIN FILTER ---
+             
+             del buildings_in_union_proj, filtered_buildings_proj # Free memory
              status_messages.append(f"Filtered to {len(buildings_in_union_gdf)} buildings within the union of tracts.")
-        else:
-             st.warning("Could not create projected GDF for precise filtering. Using simple clip.")
-             status_messages.append(f"Using {len(buildings_in_union_gdf)} buildings from simple clip (might include edge overlaps).")
 
         if buildings_in_union_gdf.empty:
             st.warning("Module C: No buildings found within the union area. Skipping height estimation.")
@@ -368,9 +396,15 @@ def run_module_c(config, classified_buildings_gdf, union_gdf, utm_crs):
                 stats_c["Height Max (m)"] = f"{height_stats.get('max', 0):.2f}"
             
             stats_c_df = pd.DataFrame.from_dict(stats_c, orient='index', columns=['Value'])
+            # Convert Value column to string BEFORE displaying
+            stats_c_df['Value'] = stats_c_df['Value'].astype(str)
             stats_c_path = os.path.join(stats_subdir, 'height_stats.csv')
-            stats_c_df.to_csv(stats_c_path)
-            status_messages.append(f"Saved: {os.path.basename(stats_c_path)}")
+            try:
+                stats_c_df.to_csv(stats_c_path)
+                status_messages.append(f"Saved: {os.path.basename(stats_c_path)}")
+            except Exception as e_save:
+                st.warning(f"Could not save height_stats.csv: {e_save}")
+                status_messages.append(f"WARN: Failed to save {os.path.basename(stats_c_path)}: {e_save}")
             st.write("Height Estimation Statistics:")
             st.dataframe(stats_c_df)
             
