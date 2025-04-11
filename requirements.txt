@@ -16,4 +16,5 @@ fuzzywuzzy>=0.18.0
 python-Levenshtein>=0.27.0
 requests
 scipy
-pyyaml 
+pyyaml
+imageio>=2.31.0 
